@@ -5,6 +5,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
@@ -35,6 +36,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         if user_input is None:
+            if not self._is_mqtt_ready():
+                errors["base"] = "mqtt_required"
+            return self.async_show_form(
+                step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            )
+
+        if not self._is_mqtt_ready():
+            errors["base"] = "mqtt_required"
             return self.async_show_form(
                 step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
             )
@@ -54,6 +63,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         title = f"Gateway {discovery[CONF_GATEWAY_MAC]}"
         return self.async_create_entry(title=title, data=discovery)
+
+    def _is_mqtt_ready(self) -> bool:
+        """Check whether the MQTT integration is loaded."""
+
+        entries = self.hass.config_entries.async_entries("mqtt")
+        return any(entry.state is ConfigEntryState.LOADED for entry in entries)
 
     async def _async_discover_gateway(self, retry_interval: int) -> Mapping[str, Any] | None:
         """Send discovery broadcast and wait for a gateway response."""

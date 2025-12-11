@@ -109,8 +109,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         loop = asyncio.get_running_loop()
         broadcast_addresses = await network.async_get_ipv4_broadcast_addresses(self.hass)
-        if not broadcast_addresses:
-            broadcast_addresses = ["255.255.255.255"]
+        addresses = [str(address) for address in broadcast_addresses]
+        if not addresses:
+            addresses = ["255.255.255.255"]
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -125,13 +126,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             while loop.time() < end_time:
                 now = loop.time()
                 if now >= next_send:
-                    for address in broadcast_addresses:
-                        await loop.run_in_executor(
-                            None,
-                            sock.sendto,
-                            DISCOVERY_MESSAGE.encode(),
-                            (str(address), DISCOVERY_BROADCAST_PORT),
-                        )
+                    for address in addresses:
+                        try:
+                            sock.sendto(
+                                DISCOVERY_MESSAGE.encode(),
+                                (address, DISCOVERY_BROADCAST_PORT),
+                            )
+                        except OSError:
+                            continue
                     next_send = now + retry_interval
 
                 try:

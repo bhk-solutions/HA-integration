@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.components.light import LightEntity
+from homeassistant.components.light import ColorMode, LightEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -17,6 +17,7 @@ from .const import (
     CONF_GATEWAY_MAC,
     CONF_GATEWAY_TYPE,
     DOMAIN,
+    GATEWAY_COMMAND_PORT,
     SIGNAL_LIGHT_REGISTER,
     SIGNAL_LIGHT_STATE,
 )
@@ -133,6 +134,8 @@ class LightManager:
 
 class BHKLightEntity(LightEntity):
     _attr_should_poll = False
+    _attr_supported_color_modes = {ColorMode.ONOFF}
+    _attr_color_mode = ColorMode.ONOFF
 
     def __init__(self, context: LightEntryContext, payload: dict[str, Any]) -> None:
         self.entry_id = context.entry_id
@@ -192,4 +195,11 @@ class BHKLightEntity(LightEntity):
             "unique_id": self._attr_unique_id,
             "state": state,
         }
+        _LOGGER.info(
+            "Sending light command for %s to %s:%s -> %s",
+            self._attr_unique_id,
+            self._gateway_ip,
+            GATEWAY_COMMAND_PORT,
+            payload,
+        )
         await async_send_udp_command(self.hass, self._gateway_ip, payload)

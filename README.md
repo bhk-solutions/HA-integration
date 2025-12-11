@@ -31,7 +31,7 @@ Chaque passerelle doit répondre au broadcast UDP de découverte (`DISCOVER_GATE
 
 Les clés ne sont pas sensibles à la casse.
 
-Une phase de découverte dure ~30 secondes : pendant ce laps de temps, toutes les passerelles répondant sont collectées pour que vous puissiez les ajouter une à une. L'intégration diffuse le message de découverte sur chaque interface réseau IPv4 disponible (Wi-Fi, Ethernet, etc.), ce qui permet de détecter des passerelles présentes sur plusieurs sous-réseaux connectés au serveur Home Assistant.
+Une phase de découverte dure ~30 secondes : pendant ce laps de temps, toutes les passerelles répondant sont collectées. Au moment de l'ajout, vous pouvez sélectionner une passerelle précise ou cocher l'option « Ajouter les autres » afin que Home Assistant crée automatiquement les entrées restantes à partir de cette même session.
 
 Après l'appairage, Home Assistant écoute en permanence les messages UDP entrants (port 50002) pour créer/mettre à jour les appareils. Aucun WebSocket n'est requis.
 

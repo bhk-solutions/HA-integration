@@ -31,10 +31,24 @@ class UDPListener:
             return
 
         loop = asyncio.get_running_loop()
-        self._transport, _ = await loop.create_datagram_endpoint(
-            lambda: _UDPProtocol(self._hass),
-            local_addr=("0.0.0.0", GATEWAY_RESPONSE_PORT),
-        )
+        kwargs = {
+            "local_addr": ("0.0.0.0", GATEWAY_RESPONSE_PORT),
+            "reuse_address": True,
+        }
+        if hasattr(socket, "SO_REUSEPORT"):
+            kwargs["reuse_port"] = True
+
+        try:
+            self._transport, _ = await loop.create_datagram_endpoint(
+                lambda: _UDPProtocol(self._hass),
+                **kwargs,
+            )
+        except (OSError, ValueError):
+            kwargs.pop("reuse_port", None)
+            self._transport, _ = await loop.create_datagram_endpoint(
+                lambda: _UDPProtocol(self._hass),
+                **kwargs,
+            )
         _LOGGER.debug("UDP listener started on port %s", GATEWAY_RESPONSE_PORT)
 
     async def async_stop(self) -> None:

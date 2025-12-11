@@ -87,7 +87,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not options:
             return self.async_abort(reason="no_new_gateway")
 
-        schema = vol.Schema({vol.Required(CONF_GATEWAY_MAC): vol.In(options)})
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_GATEWAY_MAC): vol.In(options),
+                vol.Optional("add_remaining", default=False): bool,
+            }
+        )
 
         if user_input is None:
             return self.async_show_form(
@@ -102,7 +107,20 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 step_id="select_gateway", data_schema=schema, errors=errors
             )
 
-        return await self._async_create_entry(gateway)
+        add_remaining = user_input.get("add_remaining", False)
+        result = await self._async_create_entry(gateway)
+
+        if add_remaining:
+            self._async_schedule_remaining(mac)
+
+        return result
+
+    async def async_step_import(self, import_data: dict[str, Any]) -> FlowResult:
+        mac = import_data.get(CONF_GATEWAY_MAC)
+        if mac and self._is_configured(mac):
+            return self.async_abort(reason="already_configured")
+
+        return await self._async_create_entry(import_data)
 
     async def _async_discover_gateways(self, retry_interval: int) -> list[Mapping[str, Any]]:
         """Send discovery broadcast and wait for gateway responses."""
@@ -112,6 +130,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if hasattr(socket, "SO_REUSEPORT"):
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except OSError:
+                pass
         sock.setblocking(False)
         sock.bind(("0.0.0.0", GATEWAY_RESPONSE_PORT))
 
@@ -192,3 +216,19 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         title = f"Gateway {discovery[CONF_GATEWAY_MAC]}"
         return self.async_create_entry(title=title, data=discovery)
+
+    def _async_schedule_remaining(self, selected_mac: str) -> None:
+        remaining = [
+            gateway
+            for mac, gateway in self._discovered_gateways.items()
+            if mac != selected_mac and not self._is_configured(mac)
+        ]
+
+        for gateway in remaining:
+            self.hass.async_create_task(
+                self.hass.config_entries.flow.async_init(
+                    DOMAIN,
+                    context={"source": config_entries.SOURCE_IMPORT},
+                    data=gateway,
+                )
+            )

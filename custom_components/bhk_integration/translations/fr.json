@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "BHK Integration",
+        "description": "Définis l'intervalle entre deux tentatives puis lance la découverte.",
+        "data": {
+          "retry_interval": "Intervalle de relance (secondes)"
+        }
+      }
+    },
+    "error": {
+      "no_gateway_found": "Aucune passerelle n'a répondu. Vérifie son alimentation et le réseau, puis réessaie.",
+      "no_new_gateway": "Toutes les passerelles détectées sont déjà configurées dans Home Assistant."
+    },
+    "abort": {
+      "no_new_gateway": "Toutes les passerelles détectées sont déjà configurées.",
+      "already_configured": "Cette passerelle est déjà configurée."
+    }
+  }
+}

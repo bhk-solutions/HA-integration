@@ -17,7 +17,7 @@ Clique ** OPEN WEB UI **
 
 ### Pré-requis passerelle
 
-Chaque passerelle doit exposer un serveur WebSocket et renvoyer les détails dans la réponse UDP de découverte :
+Chaque passerelle doit répondre au broadcast UDP de découverte (`DISCOVER_GATEWAY` sur le port 50000) avec un JSON sur le port 50002 :
 
 ```
 {
@@ -25,15 +25,58 @@ Chaque passerelle doit exposer un serveur WebSocket et renvoyer les détails dan
   "MAC": "AA:BB:CC:DD:EE:FF",
   "IP": "192.168.1.42",
   "Type": "UDP-BRIDGE",
-  "Version": "1.0.1",
-  "ws_port": 50001,
-  "ws_path": "/ws"
+  "Version": "1.0.1"
 }
 ```
 
-Les clés ne sont pas sensibles à la casse. `ws_port` et `ws_path` restent optionnels : s'ils sont absents, l'intégration utilise par défaut `50001` et `/ws`.
+Les clés ne sont pas sensibles à la casse.
 
-Au démarrage de Home Assistant, l'intégration ouvre automatiquement un client WS pour chaque passerelle enregistrée et écoute les états remontés. Aucune dépendance MQTT n'est nécessaire.
+Une phase de découverte dure ~30 secondes : pendant ce laps de temps, toutes les passerelles répondant sont collectées pour que vous puissiez les ajouter une à une.
+
+Après l'appairage, Home Assistant écoute en permanence les messages UDP entrants (port 50002) pour créer/mettre à jour les appareils. Aucun WebSocket n'est requis.
+
+#### Format des messages UDP vers Home Assistant
+
+1. **Inscription d'un appareil (création de l'entité)**
+
+   ```json
+   {
+     "type": "light_register",
+     "unique_id": "AA1122FF",        // identifiant unique de l'appareil
+     "name": "Lampe Salon",
+     "gateway_mac": "AA:BB:CC:DD:EE:FF" // optionnel, permet d'associer la lampe à la passerelle
+   }
+   ```
+
+   L'envoi de ce message crée (ou met à jour) l'entité lumière correspondante dans Home Assistant. `unique_id` doit rester stable dans le temps et doit être unique par appareil.
+
+2. **Mise à jour d'état d'un appareil**
+
+   ```json
+   {
+     "type": "light_state",
+     "unique_id": "AA1122FF",
+     "state": "ON" // ON ou OFF (insensible à la casse)
+   }
+   ```
+
+   Ce message met à jour l'état de la lumière dans Home Assistant. Envoyez `state": "OFF"` pour l'éteindre.
+
+#### Commandes envoyées depuis Home Assistant
+
+Lorsque l'utilisateur interagit avec l'entité, Home Assistant envoie un datagramme UDP au gateway (`IP` découverte, port 50000 par défaut) contenant :
+
+```json
+{
+  "type": "light_command",
+  "unique_id": "AA1122FF",
+  "state": "ON" // ou OFF
+}
+```
+
+Vous pouvez utiliser ce message pour piloter le périphérique réel.
+
+> Pour la phase de test, l'intégration accepte les messages provenant de n'importe quelle source. Un filtrage par passerelle sera ajouté plus tard.
 
 
 Or just 

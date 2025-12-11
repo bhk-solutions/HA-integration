@@ -13,14 +13,11 @@ from .const import (
     CONF_GATEWAY_IP,
     CONF_GATEWAY_MAC,
     CONF_GATEWAY_TYPE,
-    CONF_GATEWAY_WS_PATH,
-    CONF_GATEWAY_WS_PORT,
     CONF_RETRY_INTERVAL,
     DEFAULT_RETRY_INTERVAL,
-    DEFAULT_WEBSOCKET_PATH,
-    DEFAULT_WEBSOCKET_PORT,
     DISCOVERY_BROADCAST_PORT,
     DISCOVERY_MESSAGE,
+    DISCOVERY_WINDOW,
     DOMAIN,
     GATEWAY_RESPONSE_PORT,
 )
@@ -37,6 +34,9 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for BHK Integration."""
 
+    def __init__(self) -> None:
+        self._discovered_gateways: dict[str, dict[str, Any]] = {}
+
     async def async_step_user(self, user_input=None) -> FlowResult:
         errors = {}
 
@@ -45,24 +45,66 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
             )
 
-        discovery = await self._async_discover_gateway(
+        discovered = await self._async_discover_gateways(
             user_input.get(CONF_RETRY_INTERVAL, DEFAULT_RETRY_INTERVAL)
         )
 
-        if discovery is None:
+        if not discovered:
             errors["base"] = "no_gateway_found"
             return self.async_show_form(
                 step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
             )
 
-        await self.async_set_unique_id(discovery[CONF_GATEWAY_MAC])
-        self._abort_if_unique_id_configured()
+        self._discovered_gateways = {gw[CONF_GATEWAY_MAC]: gw for gw in discovered}
 
-        title = f"Gateway {discovery[CONF_GATEWAY_MAC]}"
-        return self.async_create_entry(title=title, data=discovery)
+        available = [
+            gw
+            for gw in discovered
+            if not self._is_configured(gw[CONF_GATEWAY_MAC])
+        ]
 
-    async def _async_discover_gateway(self, retry_interval: int) -> Mapping[str, Any] | None:
-        """Send discovery broadcast and wait for a gateway response."""
+        if not available:
+            errors["base"] = "no_new_gateway"
+            return self.async_show_form(
+                step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            )
+
+        if len(available) == 1:
+            return await self._async_create_entry(available[0])
+
+        return await self.async_step_select_gateway()
+
+    async def async_step_select_gateway(self, user_input=None) -> FlowResult:
+        errors = {}
+
+        options = {
+            mac: f"{mac} ({gateway.get(CONF_GATEWAY_IP)})"
+            for mac, gateway in self._discovered_gateways.items()
+            if not self._is_configured(mac)
+        }
+
+        if not options:
+            return self.async_abort(reason="no_new_gateway")
+
+        schema = vol.Schema({vol.Required(CONF_GATEWAY_MAC): vol.In(options)})
+
+        if user_input is None:
+            return self.async_show_form(
+                step_id="select_gateway", data_schema=schema, errors=errors
+            )
+
+        mac = user_input[CONF_GATEWAY_MAC]
+        gateway = self._discovered_gateways.get(mac)
+        if gateway is None:
+            errors["base"] = "no_gateway_found"
+            return self.async_show_form(
+                step_id="select_gateway", data_schema=schema, errors=errors
+            )
+
+        return await self._async_create_entry(gateway)
+
+    async def _async_discover_gateways(self, retry_interval: int) -> list[Mapping[str, Any]]:
+        """Send discovery broadcast and wait for gateway responses."""
 
         loop = asyncio.get_running_loop()
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -70,8 +112,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         sock.setblocking(False)
         sock.bind(("0.0.0.0", GATEWAY_RESPONSE_PORT))
 
+        discovered: dict[str, Mapping[str, Any]] = {}
+        end_time = loop.time() + DISCOVERY_WINDOW
+
         try:
-            while True:
+            while loop.time() < end_time:
                 await loop.run_in_executor(
                     None,
                     sock.sendto,
@@ -81,7 +126,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 try:
                     data, addr = await asyncio.wait_for(
-                        loop.sock_recvfrom(sock, 1024), timeout=retry_interval
+                        loop.sock_recvfrom(sock, 1024),
+                        timeout=min(retry_interval, max(end_time - loop.time(), 0)),
                     )
                 except asyncio.TimeoutError:
                     continue
@@ -93,9 +139,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 gateway = self._parse_gateway_response(response, addr[0])
                 if gateway:
-                    return gateway
+                    discovered[gateway[CONF_GATEWAY_MAC]] = gateway
         finally:
             sock.close()
+
+        return list(discovered.values())
 
     def _parse_gateway_response(self, response: str, sender_ip: str) -> Mapping[str, Any] | None:
         """Validate and parse the gateway response string."""
@@ -112,22 +160,23 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not mac:
             return None
 
-        ws_port = normalized.get("ws_port")
-        try:
-            port_value = int(ws_port) if ws_port is not None else DEFAULT_WEBSOCKET_PORT
-        except (TypeError, ValueError):
-            port_value = DEFAULT_WEBSOCKET_PORT
-
-        ws_path = normalized.get("ws_path", DEFAULT_WEBSOCKET_PATH) or DEFAULT_WEBSOCKET_PATH
-        if ws_path and not ws_path.startswith("/"):
-            ws_path = f"/{ws_path}"
-
         return {
             CONF_GATEWAY_MAC: mac,
             CONF_GATEWAY_IP: normalized.get("ip", sender_ip),
             CONF_GATEWAY_TYPE: normalized.get("type") or normalized.get("device", "unknown"),
-            CONF_GATEWAY_WS_PORT: port_value,
-            CONF_GATEWAY_WS_PATH: ws_path,
             CONF_GATEWAY_HW_VERSION: normalized.get("hardware_version")
             or normalized.get("version"),
         }
+
+    def _is_configured(self, mac: str) -> bool:
+        for entry in self._async_current_entries():
+            if entry.data.get(CONF_GATEWAY_MAC) == mac:
+                return True
+        return False
+
+    async def _async_create_entry(self, discovery: Mapping[str, Any]) -> FlowResult:
+        await self.async_set_unique_id(discovery[CONF_GATEWAY_MAC])
+        self._abort_if_unique_id_configured()
+
+        title = f"Gateway {discovery[CONF_GATEWAY_MAC]}"
+        return self.async_create_entry(title=title, data=discovery)

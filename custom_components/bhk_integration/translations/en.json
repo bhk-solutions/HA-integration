@@ -10,7 +10,8 @@
       }
     },
     "error": {
-      "no_gateway_found": "No gateway responded in time. Check its power and network connection, then try again."
+      "no_gateway_found": "No gateway responded in time. Check its power and network connection, then try again.",
+      "no_new_gateway": "All discovered gateways are already configured in Home Assistant."
     }
   }
 }

@@ -9,15 +9,11 @@ from .const import (
     CONF_GATEWAY_IP,
     CONF_GATEWAY_MAC,
     CONF_GATEWAY_TYPE,
-    CONF_GATEWAY_WS_PATH,
-    CONF_GATEWAY_WS_PORT,
-    DEFAULT_WEBSOCKET_PATH,
-    DEFAULT_WEBSOCKET_PORT,
     DOMAIN,
 )
-from .gateway import GatewayClient
+from .udp import UDPListener
 
-PLATFORMS = [Platform.LIGHT, Platform.SENSOR]
+PLATFORMS = [Platform.LIGHT]
 
 async def async_setup(hass: HomeAssistant, config: ConfigType):
     return True
@@ -25,21 +21,15 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     hass.data.setdefault(DOMAIN, {})
 
-    client = GatewayClient(
-        hass,
-        entry.data[CONF_GATEWAY_MAC],
-        entry.data[CONF_GATEWAY_IP],
-        entry.data.get(CONF_GATEWAY_WS_PORT, DEFAULT_WEBSOCKET_PORT),
-        entry.data.get(CONF_GATEWAY_WS_PATH, DEFAULT_WEBSOCKET_PATH),
-    )
+    if "udp_listener" not in hass.data[DOMAIN]:
+        listener = UDPListener(hass)
+        await listener.async_start()
+        hass.data[DOMAIN]["udp_listener"] = listener
 
     hass.data[DOMAIN][entry.entry_id] = {
-        "client": client,
         CONF_GATEWAY_MAC: entry.data.get(CONF_GATEWAY_MAC),
         CONF_GATEWAY_IP: entry.data.get(CONF_GATEWAY_IP),
         CONF_GATEWAY_TYPE: entry.data.get(CONF_GATEWAY_TYPE),
-        CONF_GATEWAY_WS_PORT: entry.data.get(CONF_GATEWAY_WS_PORT, DEFAULT_WEBSOCKET_PORT),
-        CONF_GATEWAY_WS_PATH: entry.data.get(CONF_GATEWAY_WS_PATH, DEFAULT_WEBSOCKET_PATH),
         CONF_GATEWAY_HW_VERSION: entry.data.get(CONF_GATEWAY_HW_VERSION),
     }
 
@@ -54,7 +44,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         hw_version=entry.data.get(CONF_GATEWAY_HW_VERSION),
     )
 
-    await client.async_start()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
@@ -63,8 +52,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
-        entry_data = hass.data[DOMAIN].pop(entry.entry_id)
-        client: GatewayClient = entry_data["client"]
-        await client.async_stop()
+        hass.data[DOMAIN].pop(entry.entry_id)
+
+    entry_keys = [
+        key for key in hass.data[DOMAIN] if key not in ("udp_listener", "light_manager")
+    ]
+
+    if not entry_keys:
+        listener: UDPListener | None = hass.data[DOMAIN].pop("udp_listener", None)
+        if listener:
+            await listener.async_stop()
 
     return unload_ok

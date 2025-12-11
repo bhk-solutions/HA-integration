@@ -31,34 +31,21 @@ class UDPListener:
             return
 
         loop = asyncio.get_running_loop()
-        kwargs = {"local_addr": ("0.0.0.0", GATEWAY_RESPONSE_PORT)}
-        reuse_port_supported = hasattr(socket, "SO_REUSEPORT")
+        def _bind_socket() -> socket.socket:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if hasattr(socket, "SO_REUSEPORT"):
+                try:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+                except OSError:
+                    pass
+            sock.bind(("0.0.0.0", GATEWAY_RESPONSE_PORT))
+            return sock
 
-        try:
-            self._transport, _ = await loop.create_datagram_endpoint(
-                lambda: _UDPProtocol(self._hass),
-                **kwargs,
-            )
-        except OSError as err:
-            if err.errno != getattr(socket, "EADDRINUSE", 98):
-                raise
-
-            def _bind_socket() -> socket.socket:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                if reuse_port_supported:
-                    try:
-                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-                    except OSError:
-                        pass
-                sock.bind(("0.0.0.0", GATEWAY_RESPONSE_PORT))
-                return sock
-
-            transport, _ = await loop.create_datagram_endpoint(
-                lambda: _UDPProtocol(self._hass),
-                sock=_bind_socket(),
-            )
-            self._transport = transport
+        self._transport, _ = await loop.create_datagram_endpoint(
+            lambda: _UDPProtocol(self._hass),
+            sock=_bind_socket(),
+        )
         _LOGGER.debug("UDP listener started on port %s", GATEWAY_RESPONSE_PORT)
 
     async def async_stop(self) -> None:

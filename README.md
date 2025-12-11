@@ -15,15 +15,25 @@ Lance-le
 Clique ** OPEN WEB UI **
 
 
-### Pré-requis MQTT
+### Pré-requis passerelle
 
-Toujours via **Modules complémentaires → Boutique**, installe l'add-on **Mosquitto broker** (officiel).
+Chaque passerelle doit exposer un serveur WebSocket et renvoyer les détails dans la réponse UDP de découverte :
 
-1. Active « Démarrer au démarrage » et « Recréer automatiquement ».
-2. Démarre l'add-on Mosquitto et vérifie dans les logs qu'il écoute sur le port 1883.
-3. Dans Paramètres → Appareils & Services, vérifie que l'intégration MQTT est configurée (elle se configure automatiquement après l'installation de l'add-on).
+```
+{
+  "Device": "NETWORK-GATEWAY",
+  "MAC": "AA:BB:CC:DD:EE:FF",
+  "IP": "192.168.1.42",
+  "Type": "UDP-BRIDGE",
+  "Version": "1.0.1",
+  "ws_port": 50001,
+  "ws_path": "/ws"
+}
+```
 
-Sans ce broker MQTT, l'intégration BHK refusera de démarrer.
+Les clés ne sont pas sensibles à la casse. `ws_port` et `ws_path` restent optionnels : s'ils sont absents, l'intégration utilise par défaut `50001` et `/ws`.
+
+Au démarrage de Home Assistant, l'intégration ouvre automatiquement un client WS pour chaque passerelle enregistrée et écoute les états remontés. Aucune dépendance MQTT n'est nécessaire.
 
 
 Or just 

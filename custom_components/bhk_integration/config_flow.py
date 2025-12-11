@@ -1,19 +1,24 @@
 import asyncio
+import json
 import socket
 from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigEntryState
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
+    CONF_GATEWAY_HW_VERSION,
     CONF_GATEWAY_IP,
     CONF_GATEWAY_MAC,
     CONF_GATEWAY_TYPE,
+    CONF_GATEWAY_WS_PATH,
+    CONF_GATEWAY_WS_PORT,
     CONF_RETRY_INTERVAL,
     DEFAULT_RETRY_INTERVAL,
+    DEFAULT_WEBSOCKET_PATH,
+    DEFAULT_WEBSOCKET_PORT,
     DISCOVERY_BROADCAST_PORT,
     DISCOVERY_MESSAGE,
     DOMAIN,
@@ -36,14 +41,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         if user_input is None:
-            if not self._is_mqtt_ready():
-                errors["base"] = "mqtt_required"
-            return self.async_show_form(
-                step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
-            )
-
-        if not self._is_mqtt_ready():
-            errors["base"] = "mqtt_required"
             return self.async_show_form(
                 step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
             )
@@ -63,12 +60,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         title = f"Gateway {discovery[CONF_GATEWAY_MAC]}"
         return self.async_create_entry(title=title, data=discovery)
-
-    def _is_mqtt_ready(self) -> bool:
-        """Check whether the MQTT integration is loaded."""
-
-        entries = self.hass.config_entries.async_entries("mqtt")
-        return any(entry.state is ConfigEntryState.LOADED for entry in entries)
 
     async def _async_discover_gateway(self, retry_interval: int) -> Mapping[str, Any] | None:
         """Send discovery broadcast and wait for a gateway response."""
@@ -109,25 +100,34 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def _parse_gateway_response(self, response: str, sender_ip: str) -> Mapping[str, Any] | None:
         """Validate and parse the gateway response string."""
 
-        if not response.startswith("ESP-GATEWAY"):
+        payload: dict[str, Any]
+        try:
+            payload = json.loads(response)
+        except json.JSONDecodeError:
             return None
 
-        parts = response.split("|")
-        info: dict[str, Any] = {}
+        normalized = {str(key).lower(): value for key, value in payload.items()}
 
-        for part in parts[1:]:
-            if "=" not in part:
-                continue
-            key, value = part.split("=", maxsplit=1)
-            key = key.strip().lower()
-            info[key] = value.strip()
-
-        mac = info.get("mac")
-        if mac is None:
+        mac = normalized.get("mac")
+        if not mac:
             return None
+
+        ws_port = normalized.get("ws_port")
+        try:
+            port_value = int(ws_port) if ws_port is not None else DEFAULT_WEBSOCKET_PORT
+        except (TypeError, ValueError):
+            port_value = DEFAULT_WEBSOCKET_PORT
+
+        ws_path = normalized.get("ws_path", DEFAULT_WEBSOCKET_PATH) or DEFAULT_WEBSOCKET_PATH
+        if ws_path and not ws_path.startswith("/"):
+            ws_path = f"/{ws_path}"
 
         return {
             CONF_GATEWAY_MAC: mac,
-            CONF_GATEWAY_IP: info.get("ip", sender_ip),
-            CONF_GATEWAY_TYPE: info.get("type", "unknown"),
+            CONF_GATEWAY_IP: normalized.get("ip", sender_ip),
+            CONF_GATEWAY_TYPE: normalized.get("type") or normalized.get("device", "unknown"),
+            CONF_GATEWAY_WS_PORT: port_value,
+            CONF_GATEWAY_WS_PATH: ws_path,
+            CONF_GATEWAY_HW_VERSION: normalized.get("hardware_version")
+            or normalized.get("version"),
         }

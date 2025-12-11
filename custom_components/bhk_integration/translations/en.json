@@ -1,0 +1,16 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "BHK Integration",
+        "description": "Set the discovery retry interval and submit to find your gateway.",
+        "data": {
+          "retry_interval": "Retry interval (seconds)"
+        }
+      }
+    },
+    "error": {
+      "no_gateway_found": "No gateway responded in time. Check its power and network connection, then try again."
+    }
+  }
+}

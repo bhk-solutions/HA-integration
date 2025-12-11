@@ -4,9 +4,6 @@
   "version": "0.1.0",
   "documentation": "https://github.com/bhk-solutions/HA-integration.git",
   "requirements": [],
-  "dependencies": [
-    "mqtt"
-  ],
   "iot_class": "local_push",
   "config_flow": true,
   "codeowners": [

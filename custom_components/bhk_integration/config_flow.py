@@ -108,10 +108,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Send discovery broadcast and wait for gateway responses."""
 
         loop = asyncio.get_running_loop()
-        broadcast_addresses = await network.async_get_ipv4_broadcast_addresses(self.hass)
-        addresses = [str(address) for address in broadcast_addresses]
-        if not addresses:
-            addresses = ["255.255.255.255"]
+        addresses = ["255.255.255.255"]
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)

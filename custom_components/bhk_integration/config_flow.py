@@ -6,6 +6,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.components import network
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
@@ -107,6 +108,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Send discovery broadcast and wait for gateway responses."""
 
         loop = asyncio.get_running_loop()
+        broadcast_addresses = await network.async_get_ipv4_broadcast_addresses(self.hass)
+        if not broadcast_addresses:
+            broadcast_addresses = ["255.255.255.255"]
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.setblocking(False)
@@ -114,20 +119,28 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         discovered: dict[str, Mapping[str, Any]] = {}
         end_time = loop.time() + DISCOVERY_WINDOW
+        next_send = loop.time()
 
         try:
             while loop.time() < end_time:
-                await loop.run_in_executor(
-                    None,
-                    sock.sendto,
-                    DISCOVERY_MESSAGE.encode(),
-                    ("255.255.255.255", DISCOVERY_BROADCAST_PORT),
-                )
+                now = loop.time()
+                if now >= next_send:
+                    for address in broadcast_addresses:
+                        await loop.run_in_executor(
+                            None,
+                            sock.sendto,
+                            DISCOVERY_MESSAGE.encode(),
+                            (str(address), DISCOVERY_BROADCAST_PORT),
+                        )
+                    next_send = now + retry_interval
 
                 try:
                     data, addr = await asyncio.wait_for(
                         loop.sock_recvfrom(sock, 1024),
-                        timeout=min(retry_interval, max(end_time - loop.time(), 0)),
+                        timeout=max(
+                            0,
+                            min(next_send - loop.time(), end_time - loop.time()),
+                        ),
                     )
                 except asyncio.TimeoutError:
                     continue

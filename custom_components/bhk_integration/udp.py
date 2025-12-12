@@ -12,6 +12,8 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .const import (
     GATEWAY_COMMAND_PORT,
     GATEWAY_RESPONSE_PORT,
+    SIGNAL_COVER_REGISTER,
+    SIGNAL_COVER_STATE,
     SIGNAL_LIGHT_REGISTER,
     SIGNAL_LIGHT_STATE,
 )
@@ -73,6 +75,10 @@ class _UDPProtocol(asyncio.DatagramProtocol):
             async_dispatcher_send(self._hass, SIGNAL_LIGHT_REGISTER, payload)
         elif msg_type == "light_state":
             async_dispatcher_send(self._hass, SIGNAL_LIGHT_STATE, payload)
+        elif msg_type == "cover_register":
+            async_dispatcher_send(self._hass, SIGNAL_COVER_REGISTER, payload)
+        elif msg_type == "cover_state":
+            async_dispatcher_send(self._hass, SIGNAL_COVER_STATE, payload)
         else:
             _LOGGER.debug("Ignoring unsupported UDP message type '%s'", msg_type)
 

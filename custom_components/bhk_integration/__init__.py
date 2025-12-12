@@ -13,7 +13,7 @@ from .const import (
 )
 from .udp import UDPListener
 
-PLATFORMS = [Platform.LIGHT]
+PLATFORMS = [Platform.LIGHT, Platform.COVER]
 
 async def async_setup(hass: HomeAssistant, config: ConfigType):
     return True
@@ -55,7 +55,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
         hass.data[DOMAIN].pop(entry.entry_id)
 
     entry_keys = [
-        key for key in hass.data[DOMAIN] if key not in ("udp_listener", "light_manager")
+        key
+        for key in hass.data[DOMAIN]
+        if key not in ("udp_listener", "light_manager", "cover_manager")
     ]
 
     if not entry_keys:

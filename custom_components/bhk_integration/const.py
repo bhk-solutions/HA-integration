@@ -15,3 +15,5 @@ DISCOVERY_WINDOW = 30
 
 SIGNAL_LIGHT_REGISTER = "bhk_integration_light_register"
 SIGNAL_LIGHT_STATE = "bhk_integration_light_state"
+SIGNAL_COVER_REGISTER = "bhk_integration_cover_register"
+SIGNAL_COVER_STATE = "bhk_integration_cover_state"

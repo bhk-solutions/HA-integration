@@ -37,6 +37,8 @@ Après l'appairage, Home Assistant écoute en permanence les messages UDP entran
 
 #### Format des messages UDP vers Home Assistant
 
+##### Lumières
+
 1. **Inscription d'un appareil (création de l'entité)**
 
    ```json
@@ -60,7 +62,35 @@ Après l'appairage, Home Assistant écoute en permanence les messages UDP entran
    }
    ```
 
-   Ce message met à jour l'état de la lumière dans Home Assistant. Envoyez `state": "OFF"` pour l'éteindre.
+   Ce message met à jour l'état de la lumière dans Home Assistant. Envoyez `"state": "OFF"` pour l'éteindre.
+
+##### Volets roulants
+
+1. **Inscription d'un volet**
+
+   ```json
+   {
+     "type": "cover_register",
+     "unique_id": "VR445566",
+     "name": "Volet Salon",
+     "gateway_mac": "AA:BB:CC:DD:EE:FF"
+   }
+   ```
+
+   Comme pour les lumières, ce message crée l'entité cover correspondante.
+
+2. **Mise à jour d'état / position**
+
+   ```json
+   {
+     "type": "cover_state",
+     "unique_id": "VR445566",
+     "state": "OPEN",        // OPEN, CLOSED, OPENING, CLOSING… (insensible à la casse)
+     "position": 42            // optionnel, 0-100
+   }
+   ```
+
+   `state` renseigne l'état logique (ou `OPENING`/`CLOSING`), `position` met à jour la position en pourcentage.
 
 #### Commandes envoyées depuis Home Assistant
 
@@ -74,7 +104,27 @@ Lorsque l'utilisateur interagit avec l'entité, Home Assistant envoie un datagra
 }
 ```
 
-Vous pouvez utiliser ce message pour piloter le périphérique réel.
+Les volets reçoivent des commandes similaires :
+
+```json
+{
+  "type": "cover_command",
+  "unique_id": "VR445566",
+  "command": "OPEN" // OPEN ou CLOSE
+}
+```
+
+Pour une position donnée (0-100%), encodez-la toujours dans `command` (même schéma JSON) :
+
+```json
+{
+  "type": "cover_command",
+  "unique_id": "VR445566",
+  "command": "P:30" // ici 30%
+}
+```
+
+Le gateway peut ainsi relayer tel quel la commande.
 
 > Pour la phase de test, l'intégration accepte les messages provenant de n'importe quelle source. Un filtrage par passerelle sera ajouté plus tard.
 

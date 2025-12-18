@@ -18,6 +18,7 @@ from .const import (
     CONF_GATEWAY_TYPE,
     DOMAIN,
     GATEWAY_COMMAND_PORT,
+    SIGNAL_DEVICE_JOIN,
     SIGNAL_LIGHT_REGISTER,
     SIGNAL_LIGHT_STATE,
 )
@@ -55,6 +56,7 @@ class LightManager:
         self._remove_callbacks = [
             async_dispatcher_connect(hass, SIGNAL_LIGHT_REGISTER, self._handle_register),
             async_dispatcher_connect(hass, SIGNAL_LIGHT_STATE, self._handle_state),
+            async_dispatcher_connect(hass, SIGNAL_DEVICE_JOIN, self._handle_device_join),
         ]
 
     def register_entry(
@@ -108,6 +110,40 @@ class LightManager:
 
         if "state" in data:
             entity.process_state(payload)
+
+    @callback
+    def _handle_device_join(self, payload: dict[str, Any]) -> None:
+        data = {str(k).lower(): v for k, v in payload.items()}
+        ieee = data.get("ieee")
+        ep = data.get("endpoint")
+        if not ieee or ep is None:
+            _LOGGER.debug("device_join missing ieee/endpoint: %s", payload)
+            return
+
+        # Determine type from clusters (strings like "0x0006" or ints)
+        in_clusters = data.get("in_clusters") or []
+        try:
+            cluster_ids = [
+                str(c).lower() if isinstance(c, str) else f"0x{int(c):04x}"
+                for c in in_clusters
+            ]
+        except Exception:  # noqa: BLE001
+            cluster_ids = []
+
+        if "0x0006" not in cluster_ids:
+            _LOGGER.debug("device_join ep %s lacks OnOff cluster; ignoring: %s", ep, payload)
+            return
+
+        unique_id = data.get("unique_id") or f"{ieee}_{ep}"
+        name = payload.get("name") or f"Light {ep}"
+        gateway_mac = data.get("gateway_mac")
+        register_payload = {
+            "type": "light_register",
+            "unique_id": unique_id,
+            "name": name,
+            "gateway_mac": gateway_mac,
+        }
+        self._handle_register(register_payload)
 
     @callback
     def _handle_state(self, payload: dict[str, Any]) -> None:

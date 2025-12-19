@@ -20,3 +20,8 @@ SIGNAL_COVER_REGISTER = "bhk_integration_cover_register"
 SIGNAL_COVER_STATE = "bhk_integration_cover_state"
 SIGNAL_DEVICE_JOIN = "bhk_integration_device_join"
 SIGNAL_ZB_REPORT = "bhk_integration_zb_report"
+SIGNAL_GATEWAY_ALIVE = "bhk_integration_gateway_alive"
+SIGNAL_JOIN_WINDOW = "bhk_integration_join_window"
+
+# Gateway availability timeout (seconds) – if no alive within this window, mark unavailable
+GATEWAY_ALIVE_TIMEOUT = 70

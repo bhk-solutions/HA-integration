@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.light import ColorMode, LightEntity
@@ -10,6 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
 
 from .const import (
     CONF_GATEWAY_HW_VERSION,
@@ -17,8 +19,10 @@ from .const import (
     CONF_GATEWAY_MAC,
     CONF_GATEWAY_TYPE,
     DOMAIN,
+    GATEWAY_ALIVE_TIMEOUT,
     GATEWAY_COMMAND_PORT,
     SIGNAL_DEVICE_JOIN,
+    SIGNAL_GATEWAY_ALIVE,
     SIGNAL_LIGHT_REGISTER,
     SIGNAL_LIGHT_STATE,
     SIGNAL_ZB_REPORT,
@@ -54,11 +58,16 @@ class LightManager:
         self._hass = hass
         self._entities: dict[str, BHKLightEntity] = {}
         self._contexts: dict[str, LightEntryContext] = {}
+        self._last_alive: dict[str, datetime] = {}
+        self._watchdog_unsub = async_track_time_interval(
+            hass, self._watchdog, timedelta(seconds=15)
+        )
         self._remove_callbacks = [
             async_dispatcher_connect(hass, SIGNAL_LIGHT_REGISTER, self._handle_register),
             async_dispatcher_connect(hass, SIGNAL_LIGHT_STATE, self._handle_state),
             async_dispatcher_connect(hass, SIGNAL_DEVICE_JOIN, self._handle_device_join),
             async_dispatcher_connect(hass, SIGNAL_ZB_REPORT, self._handle_zb_report),
+            async_dispatcher_connect(hass, SIGNAL_GATEWAY_ALIVE, self._handle_gateway_alive),
         ]
 
     def register_entry(
@@ -87,6 +96,9 @@ class LightManager:
             for remove in self._remove_callbacks:
                 remove()
             self._remove_callbacks.clear()
+            if self._watchdog_unsub:
+                self._watchdog_unsub()
+                self._watchdog_unsub = None
             self._hass.data[DOMAIN].pop("light_manager", None)
 
     @callback
@@ -176,6 +188,31 @@ class LightManager:
         if st is not None:
             state_payload = {"state": "on" if str(st) in ("1", "True", "true", "on") else "off"}
             entity.process_state(state_payload)
+        # mark available on any incoming report
+        if entity.set_available(True):
+            entity.async_write_ha_state()
+
+    @callback
+    def _handle_gateway_alive(self, payload: dict[str, Any]) -> None:
+        gw_mac = payload.get("mac") or payload.get("gateway_mac")
+        if not gw_mac:
+            return
+        self._last_alive[gw_mac.lower()] = datetime.utcnow()
+        self._update_availability(gw_mac, True)
+
+    @callback
+    def _watchdog(self, _now) -> None:
+        cutoff = datetime.utcnow() - timedelta(seconds=GATEWAY_ALIVE_TIMEOUT)
+        for gw_mac, ts in list(self._last_alive.items()):
+            available = ts >= cutoff
+            self._update_availability(gw_mac, available)
+
+    def _update_availability(self, gateway_mac: str, available: bool) -> None:
+        gw = gateway_mac.lower()
+        for entity in self._entities.values():
+            if entity.gateway_mac and entity.gateway_mac.lower() == gw:
+                if entity.set_available(available):
+                    entity.async_write_ha_state()
 
     def _resolve_context(self, gateway_mac: str | None) -> LightEntryContext | None:
         if gateway_mac:
@@ -204,6 +241,7 @@ class BHKLightEntity(LightEntity):
         self._endpoint = normalized.get("endpoint")
         self._device_type = normalized.get("device_type")
         self._attr_name = payload.get("name") or f"Light {unique_id}"
+        self._attr_available = True
         if self._gateway_mac:
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, self._gateway_mac)},
@@ -272,3 +310,13 @@ class BHKLightEntity(LightEntity):
             payload,
         )
         await async_send_udp_command(self.hass, self._gateway_ip, payload)
+
+    @property
+    def gateway_mac(self) -> str | None:
+        return self._gateway_mac
+
+    def set_available(self, available: bool) -> bool:
+        if self._attr_available == available:
+            return False
+        self._attr_available = available
+        return True

@@ -18,6 +18,8 @@ from .const import (
     SIGNAL_LIGHT_REGISTER,
     SIGNAL_LIGHT_STATE,
     SIGNAL_ZB_REPORT,
+    SIGNAL_GATEWAY_ALIVE,
+    SIGNAL_JOIN_WINDOW,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -85,6 +87,10 @@ class _UDPProtocol(asyncio.DatagramProtocol):
             async_dispatcher_send(self._hass, SIGNAL_DEVICE_JOIN, payload)
         elif msg_type == "zigbee_report":
             async_dispatcher_send(self._hass, SIGNAL_ZB_REPORT, payload)
+        elif msg_type == "gateway_alive":
+            async_dispatcher_send(self._hass, SIGNAL_GATEWAY_ALIVE, payload)
+        elif msg_type == "join_window":
+            async_dispatcher_send(self._hass, SIGNAL_JOIN_WINDOW, payload)
         else:
             _LOGGER.debug("Ignoring unsupported UDP message type '%s'", msg_type)
 

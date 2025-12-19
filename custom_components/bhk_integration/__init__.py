@@ -1,6 +1,7 @@
 from homeassistant.const import Platform
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 
@@ -10,6 +11,7 @@ from .const import (
     CONF_GATEWAY_MAC,
     CONF_GATEWAY_TYPE,
     DOMAIN,
+    SIGNAL_JOIN_WINDOW,
 )
 from .udp import UDPListener
 
@@ -20,6 +22,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN].setdefault("join_window_handlers", {})
 
     if "udp_listener" not in hass.data[DOMAIN]:
         listener = UDPListener(hass)
@@ -46,6 +49,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    @callback
+    def _handle_join_window(payload):
+        gw_mac = payload.get("mac") or entry.data.get(CONF_GATEWAY_MAC)
+        duration = payload.get("duration_s")
+        if not gw_mac:
+            return
+        message = f"Join window opened on gateway {gw_mac}"
+        if duration:
+            message += f" for {duration}s"
+        hass.components.persistent_notification.create(
+            message, title="Gateway Join Window", notification_id=f"join_window_{gw_mac}"
+        )
+
+    remove = async_dispatcher_connect(hass, SIGNAL_JOIN_WINDOW, _handle_join_window)
+    hass.data[DOMAIN]["join_window_handlers"][entry.entry_id] = remove
+
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
@@ -64,5 +83,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
         listener: UDPListener | None = hass.data[DOMAIN].pop("udp_listener", None)
         if listener:
             await listener.async_stop()
+
+    remover = hass.data[DOMAIN].get("join_window_handlers", {}).pop(entry.entry_id, None)
+    if remover:
+        remover()
 
     return unload_ok

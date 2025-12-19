@@ -58,8 +58,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         message = f"Join window opened on gateway {gw_mac}"
         if duration:
             message += f" for {duration}s"
-        hass.components.persistent_notification.create(
-            message, title="Gateway Join Window", notification_id=f"join_window_{gw_mac}"
+        hass.async_create_task(
+            hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "message": message,
+                    "title": "Gateway Join Window",
+                    "notification_id": f"join_window_{gw_mac}",
+                },
+                blocking=False,
+            )
         )
 
     remove = async_dispatcher_connect(hass, SIGNAL_JOIN_WINDOW, _handle_join_window)

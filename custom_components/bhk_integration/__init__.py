@@ -13,7 +13,7 @@ from .const import (
 )
 from .udp import UDPListener
 
-PLATFORMS = [Platform.LIGHT, Platform.COVER]
+PLATFORMS = [Platform.LIGHT, Platform.COVER, Platform.BUTTON]
 
 async def async_setup(hass: HomeAssistant, config: ConfigType):
     return True

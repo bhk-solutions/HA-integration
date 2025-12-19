@@ -21,6 +21,7 @@ from .const import (
     SIGNAL_DEVICE_JOIN,
     SIGNAL_LIGHT_REGISTER,
     SIGNAL_LIGHT_STATE,
+    SIGNAL_ZB_REPORT,
 )
 from .udp import async_send_udp_command
 
@@ -57,6 +58,7 @@ class LightManager:
             async_dispatcher_connect(hass, SIGNAL_LIGHT_REGISTER, self._handle_register),
             async_dispatcher_connect(hass, SIGNAL_LIGHT_STATE, self._handle_state),
             async_dispatcher_connect(hass, SIGNAL_DEVICE_JOIN, self._handle_device_join),
+            async_dispatcher_connect(hass, SIGNAL_ZB_REPORT, self._handle_zb_report),
         ]
 
     def register_entry(
@@ -114,36 +116,34 @@ class LightManager:
     @callback
     def _handle_device_join(self, payload: dict[str, Any]) -> None:
         data = {str(k).lower(): v for k, v in payload.items()}
-        ieee = data.get("ieee")
+        device_type = data.get("device_type") or ""
+        dev_id = data.get("id") or data.get("ieee") or ""
+        if not dev_id:
+            _LOGGER.debug("device_join missing id: %s", payload)
+            return
+        # Expect endpoints info from payload (may be single endpoint field or desc packets)
         ep = data.get("endpoint")
-        if not ieee or ep is None:
-            _LOGGER.debug("device_join missing ieee/endpoint: %s", payload)
+        if ep is None:
+            eps = data.get("eps") or data.get("endpoints") or []
+        else:
+            eps = [ep]
+        # Only handle our light type
+        if "3lights" not in str(device_type).lower():
             return
-
-        # Determine type from clusters (strings like "0x0006" or ints)
-        in_clusters = data.get("in_clusters") or []
-        try:
-            cluster_ids = [
-                str(c).lower() if isinstance(c, str) else f"0x{int(c):04x}"
-                for c in in_clusters
-            ]
-        except Exception:  # noqa: BLE001
-            cluster_ids = []
-
-        if "0x0006" not in cluster_ids:
-            _LOGGER.debug("device_join ep %s lacks OnOff cluster; ignoring: %s", ep, payload)
-            return
-
-        unique_id = data.get("unique_id") or f"{ieee}_{ep}"
-        name = payload.get("name") or f"Light {ep}"
         gateway_mac = data.get("gateway_mac")
-        register_payload = {
-            "type": "light_register",
-            "unique_id": unique_id,
-            "name": name,
-            "gateway_mac": gateway_mac,
-        }
-        self._handle_register(register_payload)
+        for ep_val in eps:
+            unique_id = f"{dev_id}_{ep_val}"
+            name = f"Light {ep_val}"
+            register_payload = {
+                "type": "light_register",
+                "unique_id": unique_id,
+                "name": name,
+                "gateway_mac": gateway_mac,
+                "id": dev_id,
+                "endpoint": ep_val,
+                "device_type": device_type,
+            }
+            self._handle_register(register_payload)
 
     @callback
     def _handle_state(self, payload: dict[str, Any]) -> None:
@@ -159,6 +159,23 @@ class LightManager:
             return
 
         entity.process_state(payload)
+
+    @callback
+    def _handle_zb_report(self, payload: dict[str, Any]) -> None:
+        data = {str(k).lower(): v for k, v in payload.items()}
+        dev_id = data.get("id") or data.get("ieee")
+        ep = data.get("endpoint")
+        st = data.get("st")
+        if dev_id is None or ep is None:
+            return
+        unique_id = f"{dev_id}_{ep}"
+        entity = self._entities.get(unique_id)
+        if not entity:
+            return
+        # st may be int/bool
+        if st is not None:
+            state_payload = {"state": "on" if str(st) in ("1", "True", "true", "on") else "off"}
+            entity.process_state(state_payload)
 
     def _resolve_context(self, gateway_mac: str | None) -> LightEntryContext | None:
         if gateway_mac:
@@ -183,6 +200,9 @@ class BHKLightEntity(LightEntity):
         self._gateway_type = context.gateway_type
         self._hardware_version = context.hardware_version
         self._is_on = False
+        self._id = normalized.get("id") or normalized.get("ieee")
+        self._endpoint = normalized.get("endpoint")
+        self._device_type = normalized.get("device_type")
         self._attr_name = payload.get("name") or f"Light {unique_id}"
         if self._gateway_mac:
             self._attr_device_info = DeviceInfo(
@@ -204,6 +224,13 @@ class BHKLightEntity(LightEntity):
         if name and name != self._attr_name:
             self._attr_name = name
             self.async_write_ha_state()
+        normalized = {str(k).lower(): v for k, v in payload.items()}
+        if normalized.get("id"):
+            self._id = normalized.get("id")
+        if normalized.get("endpoint") is not None:
+            self._endpoint = normalized.get("endpoint")
+        if normalized.get("device_type"):
+            self._device_type = normalized.get("device_type")
 
     def process_state(self, payload: dict[str, Any]) -> None:
         data = {str(k).lower(): v for k, v in payload.items()}
@@ -225,11 +252,17 @@ class BHKLightEntity(LightEntity):
                 "Cannot send command for %s; gateway IP unknown", self._attr_unique_id
             )
             return
+        if not self._id or self._endpoint is None:
+            _LOGGER.warning(
+                "Cannot send command for %s; missing id/endpoint", self._attr_unique_id
+            )
+            return
 
         payload = {
-            "type": "light_command",
-            "unique_id": self._attr_unique_id,
-            "state": state,
+            "type": "forward_command",
+            "id": self._id,
+            "endpoint": self._endpoint,
+            "cmd": state.lower(),
         }
         _LOGGER.info(
             "Sending light command for %s to %s:%s -> %s",

@@ -8,6 +8,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components import network
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import (

@@ -186,7 +186,10 @@ class CoverManager:
 class BHKCoverEntity(CoverEntity):
     _attr_should_poll = False
     _attr_supported_features = (
-        CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.SET_POSITION
+        CoverEntityFeature.OPEN
+        | CoverEntityFeature.CLOSE
+        | CoverEntityFeature.SET_POSITION
+        | CoverEntityFeature.STOP
     )
 
     def __init__(self, context: CoverEntryContext, payload: dict[str, Any]) -> None:
@@ -260,6 +263,14 @@ class BHKCoverEntity(CoverEntity):
             new_is_closed = None
         elif state_upper == "CLOSING":
             new_is_closed = None
+        elif state_upper == "STOP":
+            if isinstance(new_position, int):
+                if new_position == 0:
+                    new_is_closed = True
+                elif new_position == 100:
+                    new_is_closed = False
+                else:
+                    new_is_closed = None
         elif state_upper == "OPENED":
             new_is_closed = False
             new_position = 100
@@ -298,6 +309,9 @@ class BHKCoverEntity(CoverEntity):
             return
         percent = max(0, min(100, int(position)))
         await self._async_send_command(f"P:{percent}")
+
+    async def async_stop_cover(self, **kwargs: Any) -> None:
+        await self._async_send_command("STOP")
 
     async def _async_send_command(self, command: str | None = None) -> None:
         if not self._gateway_ip:

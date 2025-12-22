@@ -1,4 +1,5 @@
 import asyncio
+import ipaddress
 import json
 import socket
 from collections.abc import Mapping
@@ -14,6 +15,7 @@ from .const import (
     CONF_GATEWAY_IP,
     CONF_GATEWAY_MAC,
     CONF_GATEWAY_TYPE,
+    CONF_LOCAL_BIND_IP,
     CONF_RETRY_INTERVAL,
     DEFAULT_RETRY_INTERVAL,
     DISCOVERY_BROADCAST_PORT,
@@ -23,12 +25,23 @@ from .const import (
     GATEWAY_RESPONSE_PORT,
 )
 
+def _validate_bind_ip(value: str) -> str:
+    value = value.strip()
+    if not value:
+        return ""
+    try:
+        ipaddress.ip_address(value)
+    except ValueError as err:
+        raise vol.Invalid("invalid_ip_address") from err
+    return value
+
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_RETRY_INTERVAL, default=DEFAULT_RETRY_INTERVAL): vol.All(
             vol.Coerce(int), vol.Range(min=1)
-        )
+        ),
+        vol.Optional(CONF_LOCAL_BIND_IP, default=""): _validate_bind_ip,
     }
 )
 
@@ -37,6 +50,28 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self._discovered_gateways: dict[str, dict[str, Any]] = {}
+        self._local_bind_ip = ""
+
+    async def _get_wired_bind_ip(self) -> str:
+        adapters = await network.async_get_adapters(self.hass)
+        for adapter in adapters:
+            adapter_type = (
+                adapter.get("type") if isinstance(adapter, dict) else getattr(adapter, "type", None)
+            )
+            if not adapter_type or str(adapter_type).lower() != "ethernet":
+                continue
+            ipv4_list = (
+                adapter.get("ipv4") if isinstance(adapter, dict) else getattr(adapter, "ipv4", None)
+            )
+            if not ipv4_list:
+                continue
+            for addr in ipv4_list:
+                address = (
+                    addr.get("address") if isinstance(addr, dict) else getattr(addr, "address", None)
+                )
+                if address and not str(address).startswith("127."):
+                    return str(address)
+        return ""
 
     async def async_step_user(self, user_input=None) -> FlowResult:
         errors = {}
@@ -46,8 +81,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
             )
 
+        self._local_bind_ip = user_input.get(CONF_LOCAL_BIND_IP, "")
         discovered = await self._async_discover_gateways(
-            user_input.get(CONF_RETRY_INTERVAL, DEFAULT_RETRY_INTERVAL)
+            user_input.get(CONF_RETRY_INTERVAL, DEFAULT_RETRY_INTERVAL),
+            user_input.get(CONF_LOCAL_BIND_IP, ""),
         )
 
         if not discovered:
@@ -122,7 +159,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return await self._async_create_entry(import_data)
 
-    async def _async_discover_gateways(self, retry_interval: int) -> list[Mapping[str, Any]]:
+    async def _async_discover_gateways(
+        self, retry_interval: int, bind_ip: str
+    ) -> list[Mapping[str, Any]]:
         """Send discovery broadcast and wait for gateway responses."""
 
         loop = asyncio.get_running_loop()
@@ -137,7 +176,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except OSError:
                 pass
         sock.setblocking(False)
-        sock.bind(("0.0.0.0", GATEWAY_RESPONSE_PORT))
+        if not bind_ip:
+            bind_ip = await self._get_wired_bind_ip()
+        bind_host = bind_ip or "0.0.0.0"
+        sock.bind((bind_host, GATEWAY_RESPONSE_PORT))
 
         discovered: dict[str, Mapping[str, Any]] = {}
         end_time = loop.time() + DISCOVERY_WINDOW
@@ -214,8 +256,35 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(discovery[CONF_GATEWAY_MAC])
         self._abort_if_unique_id_configured()
 
+        data = dict(discovery)
+        if self._local_bind_ip:
+            data[CONF_LOCAL_BIND_IP] = self._local_bind_ip
         title = f"Gateway {discovery[CONF_GATEWAY_MAC]}"
-        return self.async_create_entry(title=title, data=discovery)
+        return self.async_create_entry(title=title, data=data)
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry):
+        return OptionsFlowHandler(config_entry)
+
+
+class OptionsFlowHandler(config_entries.OptionsFlow):
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        self._config_entry = config_entry
+
+    async def async_step_init(self, user_input=None) -> FlowResult:
+        errors = {}
+        current = self._config_entry.options.get(CONF_LOCAL_BIND_IP, "")
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_LOCAL_BIND_IP, default=current): _validate_bind_ip,
+            }
+        )
+
+        if user_input is None:
+            return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
+
+        return self.async_create_entry(title="", data=user_input)
 
     def _async_schedule_remaining(self, selected_mac: str) -> None:
         remaining = [

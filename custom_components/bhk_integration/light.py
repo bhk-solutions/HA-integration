@@ -22,10 +22,10 @@ from .const import (
     GATEWAY_ALIVE_TIMEOUT,
     GATEWAY_COMMAND_PORT,
     SIGNAL_DEVICE_JOIN,
+    SIGNAL_DEVICE_REPORT,
     SIGNAL_GATEWAY_ALIVE,
     SIGNAL_LIGHT_REGISTER,
     SIGNAL_LIGHT_STATE,
-    SIGNAL_ZB_REPORT,
 )
 from .udp import async_send_udp_command
 
@@ -66,7 +66,7 @@ class LightManager:
             async_dispatcher_connect(hass, SIGNAL_LIGHT_REGISTER, self._handle_register),
             async_dispatcher_connect(hass, SIGNAL_LIGHT_STATE, self._handle_state),
             async_dispatcher_connect(hass, SIGNAL_DEVICE_JOIN, self._handle_device_join),
-            async_dispatcher_connect(hass, SIGNAL_ZB_REPORT, self._handle_zb_report),
+            async_dispatcher_connect(hass, SIGNAL_DEVICE_REPORT, self._handle_device_report),
             async_dispatcher_connect(hass, SIGNAL_GATEWAY_ALIVE, self._handle_gateway_alive),
         ]
 
@@ -129,21 +129,15 @@ class LightManager:
     def _handle_device_join(self, payload: dict[str, Any]) -> None:
         data = {str(k).lower(): v for k, v in payload.items()}
         device_type = data.get("device_type") or ""
-        dev_id = data.get("id") or data.get("ieee") or ""
+        dev_id = data.get("device_id") or data.get("id") or ""
         if not dev_id:
             _LOGGER.debug("device_join missing id: %s", payload)
             return
-        # Expect endpoints info from payload (may be single endpoint field or desc packets)
-        ep = data.get("endpoint")
-        if ep is None:
-            eps = data.get("eps") or data.get("endpoints") or []
-        else:
-            eps = [ep]
         # Only handle our light type
         if "3lights" not in str(device_type).lower():
             return
         gateway_mac = data.get("gateway_mac")
-        for ep_val in eps:
+        for ep_val in range(1, 4):
             unique_id = f"{dev_id}_{ep_val}"
             name = f"Light {ep_val}"
             register_payload = {
@@ -156,6 +150,30 @@ class LightManager:
                 "device_type": device_type,
             }
             self._handle_register(register_payload)
+
+    @callback
+    def _handle_device_report(self, payload: dict[str, Any]) -> None:
+        data = {str(k).lower(): v for k, v in payload.items()}
+        dev_id = data.get("device_id") or data.get("id")
+        report = data.get("payload") or ""
+        if not dev_id or not isinstance(report, str):
+            return
+        if "_" not in report:
+            return
+        ep_str, state_str = report.split("_", 1)
+        try:
+            ep_val = int(ep_str)
+        except ValueError:
+            return
+        unique_id = f"{dev_id}_{ep_val}"
+        entity = self._entities.get(unique_id)
+        if not entity:
+            return
+        state = state_str.lower()
+        state_payload = {"state": "on" if state == "on" else "off"}
+        entity.process_state(state_payload)
+        if entity.set_available(True):
+            entity.async_write_ha_state()
 
     @callback
     def _handle_state(self, payload: dict[str, Any]) -> None:
@@ -173,25 +191,6 @@ class LightManager:
         entity.process_state(payload)
 
     @callback
-    def _handle_zb_report(self, payload: dict[str, Any]) -> None:
-        data = {str(k).lower(): v for k, v in payload.items()}
-        dev_id = data.get("id") or data.get("ieee")
-        ep = data.get("endpoint")
-        st = data.get("st")
-        if dev_id is None or ep is None:
-            return
-        unique_id = f"{dev_id}_{ep}"
-        entity = self._entities.get(unique_id)
-        if not entity:
-            return
-        # st may be int/bool
-        if st is not None:
-            state_payload = {"state": "on" if str(st) in ("1", "True", "true", "on") else "off"}
-            entity.process_state(state_payload)
-        # mark available on any incoming report
-        if entity.set_available(True):
-            entity.async_write_ha_state()
-
     @callback
     def _handle_gateway_alive(self, payload: dict[str, Any]) -> None:
         gw_mac = payload.get("mac") or payload.get("gateway_mac")
@@ -297,10 +296,9 @@ class BHKLightEntity(LightEntity):
             return
 
         payload = {
-            "type": "forward_command",
-            "id": self._id,
-            "endpoint": self._endpoint,
-            "cmd": state.lower(),
+            "type": "device_cmd",
+            "dest": self._id,
+            "com": f"{self._endpoint}_{state}",
         }
         _LOGGER.info(
             "Sending light command for %s to %s:%s -> %s",

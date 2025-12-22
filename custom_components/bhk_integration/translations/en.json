@@ -5,7 +5,8 @@
         "title": "BHK Integration",
         "description": "Set the discovery retry interval and submit to find your gateway.",
         "data": {
-          "retry_interval": "Retry interval (seconds)"
+          "retry_interval": "Retry interval (seconds)",
+          "local_bind_ip": "Bind to local IP (optional, use Ethernet IP to force interface)"
         }
       }
     },
@@ -16,6 +17,16 @@
     "abort": {
       "no_new_gateway": "All discovered gateways are already configured in Home Assistant.",
       "already_configured": "This gateway is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "UDP bind address",
+        "data": {
+          "local_bind_ip": "Bind to local IP (optional, use Ethernet IP to force interface)"
+        }
+      }
     }
   }
 }

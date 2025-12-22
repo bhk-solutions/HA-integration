@@ -5,7 +5,8 @@
         "title": "BHK Integration",
         "description": "Définis l'intervalle entre deux tentatives puis lance la découverte.",
         "data": {
-          "retry_interval": "Intervalle de relance (secondes)"
+          "retry_interval": "Intervalle de relance (secondes)",
+          "local_bind_ip": "Adresse IP locale (optionnel, utiliser l'IP Ethernet pour forcer l'interface)"
         }
       }
     },
@@ -16,6 +17,16 @@
     "abort": {
       "no_new_gateway": "Toutes les passerelles détectées sont déjà configurées.",
       "already_configured": "Cette passerelle est déjà configurée."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Adresse de liaison UDP",
+        "data": {
+          "local_bind_ip": "Adresse IP locale (optionnel, utiliser l'IP Ethernet pour forcer l'interface)"
+        }
+      }
     }
   }
 }

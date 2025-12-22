@@ -10,11 +10,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
+    CONF_LOCAL_BIND_IP,
+    DOMAIN,
     GATEWAY_COMMAND_PORT,
     GATEWAY_RESPONSE_PORT,
     SIGNAL_COVER_REGISTER,
     SIGNAL_COVER_STATE,
     SIGNAL_DEVICE_JOIN,
+    SIGNAL_DEVICE_REPORT,
     SIGNAL_LIGHT_REGISTER,
     SIGNAL_LIGHT_STATE,
     SIGNAL_ZB_REPORT,
@@ -28,8 +31,9 @@ _LOGGER = logging.getLogger(__name__)
 class UDPListener:
     """Listen for UDP messages from gateways and dispatch them."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(self, hass: HomeAssistant, bind_ip: str | None = None) -> None:
         self._hass = hass
+        self._bind_ip = bind_ip or ""
         self._transport: asyncio.DatagramTransport | None = None
 
     async def async_start(self) -> None:
@@ -45,14 +49,19 @@ class UDPListener:
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
                 except OSError:
                     pass
-            sock.bind(("0.0.0.0", GATEWAY_RESPONSE_PORT))
+            bind_host = self._bind_ip or "0.0.0.0"
+            sock.bind((bind_host, GATEWAY_RESPONSE_PORT))
             return sock
 
         self._transport, _ = await loop.create_datagram_endpoint(
             lambda: _UDPProtocol(self._hass),
             sock=_bind_socket(),
         )
-        _LOGGER.debug("UDP listener started on port %s", GATEWAY_RESPONSE_PORT)
+        _LOGGER.debug(
+            "UDP listener started on %s:%s",
+            self._bind_ip or "0.0.0.0",
+            GATEWAY_RESPONSE_PORT,
+        )
 
     async def async_stop(self) -> None:
         if self._transport is None:
@@ -88,6 +97,8 @@ class _UDPProtocol(asyncio.DatagramProtocol):
             async_dispatcher_send(self._hass, SIGNAL_COVER_STATE, payload)
         elif msg_type == "device_join":
             async_dispatcher_send(self._hass, SIGNAL_DEVICE_JOIN, payload)
+        elif msg_type == "device_report":
+            async_dispatcher_send(self._hass, SIGNAL_DEVICE_REPORT, payload)
         elif msg_type == "zigbee_report":
             async_dispatcher_send(self._hass, SIGNAL_ZB_REPORT, payload)
         elif msg_type == "gateway_alive":
@@ -107,8 +118,14 @@ async def async_send_udp_command(
     data = json.dumps(payload).encode()
     _LOGGER.debug("UDP send to %s:%s payload=%s", host, target_port, payload)
 
+    bind_ip = ""
+    if DOMAIN in hass.data:
+        bind_ip = hass.data[DOMAIN].get(CONF_LOCAL_BIND_IP, "")
+
     def _send() -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            if bind_ip:
+                sock.bind((bind_ip, 0))
             sock.sendto(data, (host, target_port))
 
     loop = asyncio.get_running_loop()

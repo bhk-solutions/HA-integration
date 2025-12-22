@@ -68,11 +68,14 @@ class _UDPProtocol(asyncio.DatagramProtocol):
         self._hass = hass
 
     def datagram_received(self, data: bytes, addr) -> None:
+        raw_preview = data.decode(errors="replace")
+        _LOGGER.debug("UDP datagram from %s len=%d raw=%r", addr, len(data), raw_preview)
         try:
             payload = json.loads(data.decode())
         except json.JSONDecodeError:
             _LOGGER.debug("Discarding non-JSON UDP payload from %s", addr)
             return
+        _LOGGER.debug("UDP JSON payload from %s: %s", addr, payload)
 
         msg_type = str(payload.get("type", "")).lower()
         if msg_type == "light_register":
@@ -102,6 +105,7 @@ async def async_send_udp_command(
 
     target_port = port or GATEWAY_COMMAND_PORT
     data = json.dumps(payload).encode()
+    _LOGGER.debug("UDP send to %s:%s payload=%s", host, target_port, payload)
 
     def _send() -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:

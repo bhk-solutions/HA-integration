@@ -12,7 +12,8 @@
     },
     "error": {
       "no_gateway_found": "No gateway responded in time. Check its power and network connection, then try again.",
-      "no_new_gateway": "All discovered gateways are already configured in Home Assistant."
+      "no_new_gateway": "All discovered gateways are already configured in Home Assistant.",
+      "invalid_bind_ip": "Bind IP must be a valid IPv4/IPv6 address."
     },
     "abort": {
       "no_new_gateway": "All discovered gateways are already configured in Home Assistant.",
@@ -25,6 +26,9 @@
         "title": "UDP bind address",
         "data": {
           "local_bind_ip": "Bind to local IP (optional, use Ethernet IP to force interface)"
+        },
+        "error": {
+          "invalid_bind_ip": "Bind IP must be a valid IPv4/IPv6 address."
         }
       }
     }

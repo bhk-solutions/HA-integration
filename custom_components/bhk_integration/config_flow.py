@@ -8,6 +8,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components import network
+from homeassistant.helpers import config_validation as cv
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
@@ -26,23 +27,12 @@ from .const import (
     GATEWAY_RESPONSE_PORT,
 )
 
-def _validate_bind_ip(value: str) -> str:
-    value = value.strip()
-    if not value:
-        return ""
-    try:
-        ipaddress.ip_address(value)
-    except ValueError as err:
-        raise vol.Invalid("invalid_ip_address") from err
-    return value
-
-
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_RETRY_INTERVAL, default=DEFAULT_RETRY_INTERVAL): vol.All(
             vol.Coerce(int), vol.Range(min=1)
         ),
-        vol.Optional(CONF_LOCAL_BIND_IP, default=""): _validate_bind_ip,
+        vol.Optional(CONF_LOCAL_BIND_IP, default=""): cv.string,
     }
 )
 
@@ -82,10 +72,21 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
             )
 
-        self._local_bind_ip = user_input.get(CONF_LOCAL_BIND_IP, "")
+        bind_ip = user_input.get(CONF_LOCAL_BIND_IP, "").strip()
+        if bind_ip:
+            try:
+                ipaddress.ip_address(bind_ip)
+            except ValueError:
+                errors["base"] = "invalid_bind_ip"
+        if errors:
+            return self.async_show_form(
+                step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            )
+
+        self._local_bind_ip = bind_ip
         discovered = await self._async_discover_gateways(
             user_input.get(CONF_RETRY_INTERVAL, DEFAULT_RETRY_INTERVAL),
-            user_input.get(CONF_LOCAL_BIND_IP, ""),
+            bind_ip,
         )
 
         if not discovered:
@@ -278,13 +279,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         current = self._config_entry.options.get(CONF_LOCAL_BIND_IP, "")
         schema = vol.Schema(
             {
-                vol.Optional(CONF_LOCAL_BIND_IP, default=current): _validate_bind_ip,
+                vol.Optional(CONF_LOCAL_BIND_IP, default=current): cv.string,
             }
         )
 
         if user_input is None:
             return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
 
+        bind_ip = user_input.get(CONF_LOCAL_BIND_IP, "").strip()
+        if bind_ip:
+            try:
+                ipaddress.ip_address(bind_ip)
+            except ValueError:
+                errors["base"] = "invalid_bind_ip"
+        if errors:
+            return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
+
+        user_input[CONF_LOCAL_BIND_IP] = bind_ip
         return self.async_create_entry(title="", data=user_input)
 
     def _async_schedule_remaining(self, selected_mac: str) -> None:
